@@ -171,7 +171,7 @@ export async function searchFoursquarePlaces(
       radius: validRadius.toString(),
       limit: limit.toString(),
       sort: 'RELEVANCE',
-      fields: 'fsq_id,name,location,categories,distance,rating,stats,hours,tel,website,price,photos,popularity,verified',
+      fields: 'name,location,categories,distance,rating,stats,hours,tel,website,price,photos,popularity',
     });
 
     // Add category filter
