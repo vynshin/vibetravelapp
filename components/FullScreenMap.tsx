@@ -22,10 +22,9 @@ const { width, height } = Dimensions.get('window');
 
 const getCategoryColor = (category: PlaceCategory) => {
   switch (category) {
-    case PlaceCategory.EAT: return '#f97316';
-    case PlaceCategory.DRINK: return '#a855f7';
-    case PlaceCategory.SIGHT: return '#3b82f6';
-    case PlaceCategory.DO: return '#10b981';
+    case PlaceCategory.EAT: return '#f97316';    // Orange
+    case PlaceCategory.DRINK: return '#a855f7';  // Purple
+    case PlaceCategory.EXPLORE: return '#14b8a6'; // Teal (merged DO + SIGHT)
     default: return '#64748b';
   }
 };
@@ -44,16 +43,10 @@ const getCategoryIcon = (category: PlaceCategory) => {
           <Path d="M3 2l2.01 18.23C5.13 21.23 5.97 22 7 22h10c1.03 0 1.87-.77 1.99-1.77L21 2H3zm9 17c-1.66 0-3-1.34-3-3 0-2 3-5.4 3-5.4s3 3.4 3 5.4c0 1.66-1.34 3-3 3z"/>
         </Svg>
       );
-    case PlaceCategory.SIGHT:
+    case PlaceCategory.EXPLORE:
       return (
         <Svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-          <Path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-        </Svg>
-      );
-    case PlaceCategory.DO:
-      return (
-        <Svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-          <Path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+          <Path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
         </Svg>
       );
     default:

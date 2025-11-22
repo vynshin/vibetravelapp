@@ -228,9 +228,8 @@ NO numbering, bullets, or markdown formatting. Plain text only.`;
         let category = PlaceCategory.UNKNOWN;
         if (categoryRaw.includes("EAT")) category = PlaceCategory.EAT;
         else if (categoryRaw.includes("DRINK")) category = PlaceCategory.DRINK;
-        else if (categoryRaw.includes("DO")) category = PlaceCategory.DO;
-        else if (categoryRaw.includes("SIGHT")) category = PlaceCategory.SIGHT;
-        else category = PlaceCategory.DO;
+        else if (categoryRaw.includes("EXPLORE") || categoryRaw.includes("DO") || categoryRaw.includes("SIGHT")) category = PlaceCategory.EXPLORE;
+        else category = PlaceCategory.EXPLORE;
 
         discoveries.push({ name, category, vibe });
       }
@@ -535,8 +534,7 @@ export const getRecommendations = async (
             let category: PlaceCategory;
 
             if (categoryStr === 'DRINK') category = PlaceCategory.DRINK;
-            else if (categoryStr === 'SIGHT') category = PlaceCategory.SIGHT;
-            else if (categoryStr === 'DO') category = PlaceCategory.DO;
+            else if (categoryStr === 'EXPLORE' || categoryStr === 'SIGHT' || categoryStr === 'DO') category = PlaceCategory.EXPLORE;
             else category = PlaceCategory.EAT; // Default to EAT
 
             discoveries.push({
@@ -871,15 +869,13 @@ export const getRecommendationsWithFoursquare = async (
       .map(cat => {
         if (cat === 'EAT') return PlaceCategory.EAT;
         if (cat === 'DRINK') return PlaceCategory.DRINK;
-        if (cat === 'SIGHT') return PlaceCategory.SIGHT;
-        if (cat === 'DO') return PlaceCategory.DO;
+        if (cat === 'EXPLORE' || cat === 'SIGHT' || cat === 'DO') return PlaceCategory.EXPLORE;
         return null;
       })
       .filter((cat): cat is PlaceCategory => cat !== null);
 
-    // Adjust minimum places based on category (DO and SIGHT are rarer)
-    const MIN_PLACES = categoryFilters.includes(PlaceCategory.DO) ? 4 :
-                       categoryFilters.includes(PlaceCategory.SIGHT) ? 5 : 8;
+    // Adjust minimum places based on category (EXPLORE is rarer than EAT/DRINK)
+    const MIN_PLACES = categoryFilters.includes(PlaceCategory.EXPLORE) ? 4 : 8;
     console.log(`📊 Target: ${MIN_PLACES}+ places for ${categoryFilters.join(', ') || 'all categories'}`);
 
     while (attempts < MAX_ATTEMPTS) {
@@ -1095,9 +1091,9 @@ export const getRecommendationsWithFoursquare = async (
           continue;
         }
 
-        // If still not enough places and searching for DO category, try OSM as fallback
-        if (finalPlaces.length < MIN_PLACES && categoryFilters.includes(PlaceCategory.DO)) {
-          console.log(`⚠️ Only ${finalPlaces.length} Foursquare results for DO category`);
+        // If still not enough places and searching for EXPLORE category, try OSM as fallback
+        if (finalPlaces.length < MIN_PLACES && categoryFilters.includes(PlaceCategory.EXPLORE)) {
+          console.log(`⚠️ Only ${finalPlaces.length} Foursquare results for EXPLORE category`);
           console.log(`🗺️ Trying OpenStreetMap Overpass API as fallback...`);
 
           try {
@@ -1114,7 +1110,7 @@ export const getRecommendationsWithFoursquare = async (
               id: `osm-${osm.id}`,
               name: osm.tags.name || 'Unknown',
               address: formatOSMAddress(osm),
-              category: PlaceCategory.DO,
+              category: PlaceCategory.EXPLORE,
               rating: 'Not rated', // OSM doesn't have ratings
               description: getOSMCategoryDescription(osm),
               reason: `${getOSMCategoryDescription(osm)} - Community-recommended activity venue`,

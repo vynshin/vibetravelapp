@@ -99,7 +99,7 @@ export function DiscoverScreen() {
   const [currentRadius, setCurrentRadius] = useState<number>(3.2); // Track current search radius
   const [openNowFilter, setOpenNowFilter] = useState<boolean>(false); // Filter for places open now
   const [hotAndNewFilter, setHotAndNewFilter] = useState<boolean>(false); // Filter for trending/new places
-  const [categoryFilters, setCategoryFilters] = useState<Set<string>>(() => new Set()); // Active category filters (EAT, DRINK, SIGHT, DO) - use lazy initialization to prevent recreating Set on every render
+  const [categoryFilters, setCategoryFilters] = useState<Set<string>>(() => new Set()); // Active category filters (EAT, DRINK, EXPLORE) - use lazy initialization to prevent recreating Set on every render
 
   // Memoize categoryFilters as a stable string for useCallback dependencies
   const categoryFiltersKey = useMemo(() => Array.from(categoryFilters).sort().join(','), [categoryFilters]);
@@ -278,13 +278,10 @@ export function DiscoverScreen() {
 
     const categoriesArray = Array.from(categoryFilters);
 
-    // Adjust radius based on category type (DO and SIGHT venues are rarer)
-    if (categoriesArray.includes('DO')) {
-      radiusKm = Math.max(radiusKm, 8); // Min 8km (5 miles) for DO - activities are rare
-      console.log(`🎯 DO filter active - expanded radius to ${radiusKm}km to find activities`);
-    } else if (categoriesArray.includes('SIGHT')) {
-      radiusKm = Math.max(radiusKm, 4.8); // Min 4.8km (3 miles) for SIGHT - museums/landmarks are less common
-      console.log(`👁️ SIGHT filter active - expanded radius to ${radiusKm}km to find attractions`);
+    // Adjust radius based on category type (EXPLORE venues are rarer than EAT/DRINK)
+    if (categoriesArray.includes('EXPLORE')) {
+      radiusKm = Math.max(radiusKm, 6); // Min 6km (3.7 miles) for EXPLORE - activities and landmarks are less common
+      console.log(`🎯 EXPLORE filter active - expanded radius to ${radiusKm}km to find activities and attractions`);
     }
 
     setCurrentRadius(radiusKm); // Store current radius for display
@@ -1092,9 +1089,9 @@ export function DiscoverScreen() {
               style={styles.filterChipsContainer}
               contentContainerStyle={styles.filterChipsContent}
             >
-              {/* Category Filter Toggles - Eat, See, Drink, Do */}
-              {['EAT', 'SIGHT', 'DRINK', 'DO'].map(category => {
-                const displayName = category === 'SIGHT' ? 'See' : category.charAt(0) + category.slice(1).toLowerCase();
+              {/* Category Filter Toggles - Eat, Drink, Explore */}
+              {['EAT', 'DRINK', 'EXPLORE'].map(category => {
+                const displayName = category.charAt(0) + category.slice(1).toLowerCase();
                 return (
                   <TouchableOpacity
                     key={category}

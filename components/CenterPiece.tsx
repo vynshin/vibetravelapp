@@ -48,10 +48,8 @@ const getCategoryColor = (category: PlaceCategory): string => {
       return '#f97316'; // Orange
     case PlaceCategory.DRINK:
       return '#a855f7'; // Purple
-    case PlaceCategory.SIGHT:
-      return '#3b82f6'; // Blue
-    case PlaceCategory.DO:
-      return '#10b981'; // Green
+    case PlaceCategory.EXPLORE:
+      return '#14b8a6'; // Teal (merged DO + SIGHT)
     default:
       return '#ef4444'; // Red (fallback)
   }

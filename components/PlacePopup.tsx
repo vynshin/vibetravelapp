@@ -29,10 +29,9 @@ interface PlacePopupProps {
 
 const getCategoryColor = (cat: PlaceCategory) => {
   switch (cat) {
-    case PlaceCategory.EAT: return '#f97316';
-    case PlaceCategory.DRINK: return '#a855f7';
-    case PlaceCategory.SIGHT: return '#3b82f6';
-    case PlaceCategory.DO: return '#10b981';
+    case PlaceCategory.EAT: return '#f97316';    // Orange
+    case PlaceCategory.DRINK: return '#a855f7';  // Purple
+    case PlaceCategory.EXPLORE: return '#14b8a6'; // Teal (merged DO + SIGHT)
     default: return '#64748b';
   }
 };
@@ -214,7 +213,7 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
         // Photos now come only from Foursquare/OSM via place.images
 
         // Try Wikipedia ONLY for landmarks/sights (restaurants rarely have wiki pages and names can be ambiguous)
-        if (place.category === PlaceCategory.SIGHT || place.category === PlaceCategory.DO) {
+        if (place.category === PlaceCategory.EXPLORE) {
           const wikiImage = await fetchWikiImage(place.name);
           if (wikiImage && !photos.includes(wikiImage)) {
              photos.unshift(wikiImage);

@@ -6,9 +6,8 @@ export interface Coordinates {
 
 export enum PlaceCategory {
   EAT = 'EAT',
-  DO = 'DO',
   DRINK = 'DRINK',
-  SIGHT = 'SIGHT',
+  EXPLORE = 'EXPLORE', // Merged DO + SIGHT (activities + sights)
   UNKNOWN = 'UNKNOWN'
 }
 

@@ -19,10 +19,9 @@ interface PlaceCardProps {
 
 const getCategoryColor = (cat: PlaceCategory) => {
   switch (cat) {
-    case PlaceCategory.EAT: return '#f97316';
-    case PlaceCategory.DRINK: return '#a855f7';
-    case PlaceCategory.SIGHT: return '#3b82f6';
-    case PlaceCategory.DO: return '#10b981';
+    case PlaceCategory.EAT: return '#f97316';    // Orange
+    case PlaceCategory.DRINK: return '#a855f7';  // Purple
+    case PlaceCategory.EXPLORE: return '#14b8a6'; // Teal (merged DO + SIGHT)
     default: return '#64748b';
   }
 };
@@ -153,9 +152,7 @@ export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, on
           />
         )}
         {!bgImage && (
-          <View style={[styles.image, { backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' }]}>
-            <Text style={{ color: '#64748b', fontSize: 48 }}>📍</Text>
-          </View>
+          <View style={[styles.image, { backgroundColor: '#1e293b' }]} />
         )}
 
         {/* Gradient Overlay */}

@@ -40,7 +40,8 @@ const CATEGORY_MAPPING: Record<PlaceCategory, string[]> = {
     '4bf58dd8d48988d1e0931735', // Coffee Shop
     '4bf58dd8d48988d155941735', // Brewery
   ],
-  [PlaceCategory.SIGHT]: [
+  [PlaceCategory.EXPLORE]: [
+    // Sights & Landmarks
     '4bf58dd8d48988d181941735', // Museum
     '4bf58dd8d48988d18f941735', // Art Museum
     '4bf58dd8d48988d190941735', // History Museum
@@ -53,8 +54,7 @@ const CATEGORY_MAPPING: Record<PlaceCategory, string[]> = {
     '4bf58dd8d48988d17b941735', // Zoo
     '52e81612bcbc57f1066b7a22', // Botanical Garden
     '52e81612bcbc57f1066b7a14', // Palace
-  ],
-  [PlaceCategory.DO]: [
+    // Activities & Entertainment
     '4d4b7104d754a06370d81259', // Arts & Entertainment (parent)
     '4bf58dd8d48988d17f941735', // Movie Theater
     '4bf58dd8d48988d1ac941735', // Concert Hall
@@ -177,7 +177,7 @@ export async function searchFoursquarePlaces(
     // If categories specified, use those. Otherwise, use ALL hospitality categories to exclude retail/non-hospitality
     const categoriesToFetch = categories && categories.length > 0
       ? categories
-      : [PlaceCategory.EAT, PlaceCategory.DRINK, PlaceCategory.SIGHT, PlaceCategory.DO];
+      : [PlaceCategory.EAT, PlaceCategory.DRINK, PlaceCategory.EXPLORE];
 
     const categoryIds = categoriesToFetch
       .flatMap(cat => CATEGORY_MAPPING[cat] || [])
@@ -340,15 +340,11 @@ export function mapFoursquareCategory(fsqCategories: FoursquarePlace['categories
     return PlaceCategory.DRINK;
   }
 
-  // SIGHT
+  // EXPLORE - sights, landmarks, activities, and entertainment
   if (categoryName.includes('museum') || categoryName.includes('monument') || categoryName.includes('landmark') ||
       categoryName.includes('historic') || categoryName.includes('gallery') || categoryName.includes('park') ||
-      categoryName.includes('garden') || categoryName.includes('zoo') || categoryName.includes('scenic')) {
-    return PlaceCategory.SIGHT;
-  }
-
-  // DO - activities and entertainment
-  if (categoryName.includes('trampoline') || categoryName.includes('archery') || categoryName.includes('axe throwing') ||
+      categoryName.includes('garden') || categoryName.includes('zoo') || categoryName.includes('scenic') ||
+      categoryName.includes('trampoline') || categoryName.includes('archery') || categoryName.includes('axe throwing') ||
       categoryName.includes('bowling') || categoryName.includes('arcade') || categoryName.includes('escape room') ||
       categoryName.includes('laser tag') || categoryName.includes('go kart') || categoryName.includes('climbing') ||
       categoryName.includes('golf') || categoryName.includes('mini golf') || categoryName.includes('putt') ||
@@ -361,7 +357,7 @@ export function mapFoursquareCategory(fsqCategories: FoursquarePlace['categories
       categoryName.includes('cyber cafe') || categoryName.includes('vr') || categoryName.includes('virtual reality') ||
       categoryName.includes('ping pong') || categoryName.includes('table tennis') || categoryName.includes('badminton') ||
       categoryName.includes('paintball') || categoryName.includes('rock wall') || categoryName.includes('bouldering')) {
-    return PlaceCategory.DO;
+    return PlaceCategory.EXPLORE;
   }
 
   // EAT - only if food-related
