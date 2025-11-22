@@ -222,13 +222,20 @@ export async function searchFoursquarePlaces(
 
     console.log(`✅ Foursquare found ${places.length} places`);
 
-    // Debug: Log sample categories and photos
+    // Debug: Log raw first place to see all returned fields
     if (places.length > 0) {
-      console.log('📂 Sample Foursquare categories:');
+      console.log('🔍 RAW First Foursquare place:', JSON.stringify(places[0], null, 2));
+    }
+
+    // Debug: Log sample categories, photos, and geocodes
+    if (places.length > 0) {
+      console.log('📂 Sample Foursquare data:');
       places.slice(0, 3).forEach((p: FoursquarePlace) => {
         const catNames = p.categories?.map(c => `${c.name} (${c.fsq_category_id})`).join(', ') || 'none';
         const photoCount = p.photos?.length || 0;
-        console.log(`  - ${p.name}: ${catNames} [${photoCount} photos]`);
+        const hasGeocodes = p.geocodes?.main ? 'YES' : 'NO';
+        const coords = p.geocodes?.main ? `${p.geocodes.main.latitude},${p.geocodes.main.longitude}` : 'none';
+        console.log(`  - ${p.name}: ${catNames} [${photoCount} photos] [geocodes: ${hasGeocodes} ${coords}]`);
       });
     }
 

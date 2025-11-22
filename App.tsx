@@ -1001,7 +1001,7 @@ export function DiscoverScreen() {
               <View key={`row-${rowIndex}`} style={[styles.row, { gap }]}>
                 {[0, 1, 2].map((colIndex) => {
                   const index = rowIndex * 3 + colIndex;
-                  
+
                   // Center cell (row 1, col 1)
                   if (rowIndex === 1 && colIndex === 1) {
                     return (
@@ -1019,12 +1019,12 @@ export function DiscoverScreen() {
                       </View>
                     );
                   }
-                  
+
                   // Map places around center
                   const placeIndex = index > 4 ? index - 1 : index;
                   const place = filteredPlaces[placeIndex];
 
-                  if (!place) return null;
+                  if (!place) return <View key={`empty-${index}`} style={{ width: cardWidth, height: cardHeight }} />;
                   
                   return (
                     <View key={place.id} style={{ width: cardWidth, height: cardHeight }}>
