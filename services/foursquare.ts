@@ -171,6 +171,7 @@ export async function searchFoursquarePlaces(
       radius: validRadius.toString(),
       limit: limit.toString(),
       sort: 'RELEVANCE',
+      fields: 'fsq_id,name,location,categories,distance,rating,stats,hours,tel,website,price,photos,popularity,verified',
     });
 
     // Add category filter
@@ -217,12 +218,13 @@ export async function searchFoursquarePlaces(
 
     console.log(`✅ Foursquare found ${places.length} places`);
 
-    // Debug: Log sample categories
+    // Debug: Log sample categories and photos
     if (places.length > 0) {
       console.log('📂 Sample Foursquare categories:');
       places.slice(0, 3).forEach((p: FoursquarePlace) => {
         const catNames = p.categories?.map(c => `${c.name} (${c.fsq_category_id})`).join(', ') || 'none';
-        console.log(`  - ${p.name}: ${catNames}`);
+        const photoCount = p.photos?.length || 0;
+        console.log(`  - ${p.name}: ${catNames} [${photoCount} photos]`);
       });
     }
 
