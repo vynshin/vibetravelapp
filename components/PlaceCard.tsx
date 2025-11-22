@@ -175,7 +175,9 @@ export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, on
             )}
             <View style={styles.ratingBadge}>
               <Text style={styles.starIcon}>★</Text>
-              <Text style={styles.ratingText}>{place.rating}</Text>
+              <Text style={styles.ratingText}>
+                {place.rating ? place.rating.split(' ')[0] : 'N/A'}
+              </Text>
             </View>
           </View>
         </View>
