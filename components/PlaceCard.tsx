@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, StyleSheet, Animated, Share, Alert } from 'react-native';
 import { Place, PlaceCategory } from '../types';
 import { getPlacePhotos } from '../services/places';
-import { savePlace, hidePlace, getSavedPlaces, unsavePlace } from '../services/storage';
+import { hidePlace } from '../services/storage';
+import { getFavorites, savePlaceToFavorites, removePlaceFromFavorites } from '../services/collections';
 import { PlaceActionSheet } from './PlaceActionSheet';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -13,6 +14,7 @@ interface PlaceCardProps {
   onSelect: (place: Place) => void;
   onHidePlace?: (placeName: string) => void;
   coords?: { latitude: number; longitude: number };
+  index?: number; // Map marker number
 }
 
 const getCategoryColor = (cat: PlaceCategory) => {
@@ -25,81 +27,29 @@ const getCategoryColor = (cat: PlaceCategory) => {
   }
 };
 
-export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, onHidePlace, coords }) => {
+export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, onHidePlace, coords, index }) => {
   const [imgError, setImgError] = useState(false);
-  const [placeImages, setPlaceImages] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [placeImages, setPlaceImages] = useState<string[]>(place.images || []);
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isClosed, setIsClosed] = useState(false); // Track if business is closed
   const [fadeAnim] = useState(new Animated.Value(0));
   const [scaleAnim] = useState(new Animated.Value(0.95));
 
-  // Fallback: AI generation (Last Resort)
-  const aiFallbackUrl = `https://image.pollinations.ai/prompt/photorealistic%20photo%20of%20${encodeURIComponent(place.name)}%20${encodeURIComponent(place.category)}%20high%20quality%20lighting?width=400&height=400&nologo=true&seed=${place.id}`;
+  // Use real Google Photos only (lazy loaded)
+  const bgImage = placeImages.length > 0 ? placeImages[0] : null;
 
-  // Priority: Google Places photos first, then AI fallback
-  const bgImage = placeImages.length > 0 && !imgError ? placeImages[0] : aiFallbackUrl;
-
-  // Check if place is already saved
+  // Check if place is already favorited
   useEffect(() => {
     const checkSaved = async () => {
-      const saved = await getSavedPlaces();
-      setIsSaved(saved.some(p => p.name === place.name));
+      const favorites = await getFavorites();
+      setIsSaved(favorites.some(p => p.id === place.id));
     };
     checkSaved();
-  }, [place.name]);
+  }, [place.id]);
 
+  // Entrance animation
   useEffect(() => {
-    let isMounted = true;
-    let retryCount = 0;
-    const maxRetries = 2;
-    
-    const fetchPhoto = async (attemptNumber: number = 0) => {
-        if (!coords) {
-          // No coords, use AI fallback immediately
-          return;
-        }
-        
-        try {
-          // Timeout increases with each retry: 5s, 8s, 12s
-          const timeoutDuration = 5000 + (attemptNumber * 3000);
-          const timeoutPromise = new Promise<string[]>((_, reject) => 
-            setTimeout(() => reject(new Error('timeout')), timeoutDuration)
-          );
-          
-          const photosPromise = getPlacePhotos(place.name, coords.latitude, coords.longitude);
-          
-          const photos = await Promise.race([photosPromise, timeoutPromise]);
-          
-          if (isMounted && photos.length > 0) {
-            setPlaceImages(photos);
-            setIsLoading(false);
-            console.log(`✅ Loaded photo for ${place.name}`);
-          } else if (isMounted && attemptNumber < maxRetries) {
-            // No photos found, retry
-            retryCount++;
-            console.log(`🔄 Retrying photo fetch for ${place.name} (attempt ${retryCount + 1})`);
-            setTimeout(() => fetchPhoto(attemptNumber + 1), 1000 * (attemptNumber + 1));
-          } else {
-            console.log(`⚠️ No photos found for ${place.name}, using AI fallback`);
-            setIsLoading(false);
-          }
-        } catch (error) {
-          if (isMounted && attemptNumber < maxRetries) {
-            // Timeout or error, retry with exponential backoff
-            retryCount++;
-            console.log(`🔄 Retrying photo fetch for ${place.name} after error (attempt ${retryCount + 1})`);
-            setTimeout(() => fetchPhoto(attemptNumber + 1), 1000 * (attemptNumber + 1));
-          } else {
-            console.log(`❌ Failed to fetch photos for ${place.name} after ${maxRetries + 1} attempts, using AI fallback`);
-            setIsLoading(false);
-            // Will use AI fallback automatically
-          }
-        }
-    };
-    fetchPhoto();
-
-    // Entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -113,26 +63,69 @@ export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, on
         useNativeDriver: true,
       })
     ]).start();
+  }, [delay]);
+
+  // Lazy load Google Photos + check business status when card renders (drawer 8)
+  useEffect(() => {
+    if (place.images && place.images.length > 0) {
+      setPlaceImages(place.images);
+      return;
+    }
+
+    if (!coords) return;
+
+    let isMounted = true;
+
+    // Import getPlaceFullDetails to check business status
+    import('../services/places').then(({ getPlaceFullDetails }) => {
+      getPlaceFullDetails(place.name, coords.latitude, coords.longitude)
+        .then(details => {
+          if (!isMounted) return;
+
+          // Check business status (FREE - included in the same API call as photos)
+          if (details?.business_status === 'CLOSED_PERMANENTLY' ||
+              details?.business_status === 'CLOSED_TEMPORARILY') {
+            console.log(`🚫 Place is closed: ${place.name} (${details.business_status})`);
+            setIsClosed(true);
+            // Notify parent to hide this card
+            if (onHidePlace) {
+              onHidePlace(place.name);
+            }
+            return;
+          }
+
+          // Load photos if business is open
+          if (details?.photos && details.photos.length > 0) {
+            import('../services/places').then(({ getPlacePhotoUrl }) => {
+              const photoUrls = details.photos
+                .slice(0, 8)
+                .map((photo: any) => getPlacePhotoUrl(photo.photo_reference, 400));
+              setPlaceImages(photoUrls);
+            });
+          }
+        })
+        .catch((err) => {
+          console.error(`Failed to load details for ${place.name}:`, err);
+        });
+    });
 
     return () => { isMounted = false; };
-  }, [place.name, coords?.latitude, coords?.longitude]);
+  }, [place.name, place.images, coords?.latitude, coords?.longitude]);
 
   const handleSelect = () => {
-     onSelect({ ...place, images: placeImages });
+    onSelect({ ...place, images: placeImages });
   };
 
   const handleSave = async () => {
     try {
       if (isSaved) {
-        // Already saved, so unsave it
-        await unsavePlace(place.name);
+        await removePlaceFromFavorites(place.id);
         setIsSaved(false);
-        Alert.alert('Removed', `${place.name} has been removed from your list.`, [{ text: 'OK' }]);
+        Alert.alert('Removed', `${place.name} has been removed from favorites.`, [{ text: 'OK' }]);
       } else {
-        // Not saved yet, so save it
-        await savePlace({ ...place, images: placeImages });
+        await savePlaceToFavorites({ ...place, images: placeImages });
         setIsSaved(true);
-        Alert.alert('Saved!', `${place.name} has been saved to your list.`, [{ text: 'OK' }]);
+        Alert.alert('Saved!', `${place.name} has been saved to favorites.`, [{ text: 'OK' }]);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to save/unsave place');
@@ -156,7 +149,7 @@ export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, on
       }${
         place.mapLink ? `\n\nMap: ${place.mapLink}` : ''
       }`;
-      
+
       await Share.share({
         message,
         title: place.name,
@@ -166,31 +159,43 @@ export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, on
     }
   };
 
+  // Don't render if business is closed
+  if (isClosed) {
+    return null;
+  }
+
   return (
     <>
       <Animated.View style={[styles.container, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
-        <TouchableOpacity 
+        <TouchableOpacity
           activeOpacity={0.9}
           onPress={handleSelect}
           onLongPress={() => setShowActionSheet(true)}
           delayLongPress={500}
           style={styles.touchable}
         >
-        {/* Background Image */}
-        <Image 
-          source={{ uri: bgImage }}
-          style={styles.image}
-          onError={(e) => {
-            console.log(`❌ Image load error for ${place.name}:`, e.nativeEvent.error);
-            setImgError(true);
-          }}
-          onLoad={() => {
-            if (!isLoading) {
-              console.log(`✅ Image rendered for ${place.name}`);
-            }
-          }}
-        />
-        
+        {/* Background Image - Real Google Photos only */}
+        {bgImage && (
+          <Image
+            source={{ uri: bgImage }}
+            style={styles.image}
+            onError={() => {
+              if (!imgError) {
+                console.log(`❌ Image failed to load for ${place.name}`);
+                setImgError(true);
+              }
+            }}
+            onLoad={() => {
+              console.log(`✅ Image loaded for ${place.name}`);
+            }}
+          />
+        )}
+        {!bgImage && (
+          <View style={[styles.image, { backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' }]}>
+            <Text style={{ color: '#64748b', fontSize: 48 }}>📍</Text>
+          </View>
+        )}
+
         {/* Gradient Overlay */}
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.9)']}
@@ -199,30 +204,36 @@ export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, on
 
         {/* Top Badges */}
         <View style={styles.topContent}>
+          {/* All badges in one row (left side) */}
           <View style={styles.badges}>
             <View style={[styles.categoryBadge, { backgroundColor: getCategoryColor(place.category) }]}>
               <Text style={styles.categoryText}>{place.category}</Text>
             </View>
+            {index !== undefined && (
+              <View style={styles.numberBadge}>
+                <Text style={styles.numberBadgeText}>{index + 1}</Text>
+              </View>
+            )}
             <View style={styles.ratingBadge}>
               <Text style={styles.starIcon}>★</Text>
               <Text style={styles.ratingText}>{place.rating}</Text>
             </View>
           </View>
         </View>
-        
+
         {/* Bottom Content */}
         <View style={styles.bottomContent}>
           <Text style={styles.name} numberOfLines={2}>
             {place.name}
           </Text>
-          
+
           <Text style={styles.description} numberOfLines={2}>
             {place.description}
           </Text>
         </View>
         </TouchableOpacity>
       </Animated.View>
-      
+
       <PlaceActionSheet
         visible={showActionSheet}
         placeName={place.name}
@@ -264,6 +275,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   bottomContent: {
     position: 'absolute',
@@ -307,6 +321,19 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#fbbf24',
+  },
+  numberBadge: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  numberBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#fff',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   name: {
     fontSize: 18,

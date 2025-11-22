@@ -13,38 +13,22 @@ import {
   Platform,
   Animated,
   Keyboard,
-  Modal,
-  Alert
+  RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { getRecommendations, getRecommendationsWithFoursquare } from './services/gemini';
-
-// Use Foursquare for FREE searches (10K/month)
-// Note: Check at runtime since env vars may not be available at module init
-const USE_FOURSQUARE = !!process.env.EXPO_PUBLIC_FOURSQUARE_API_KEY;
-console.log(`🔑 Foursquare API key configured: ${USE_FOURSQUARE ? 'YES' : 'NO (using Google)'}`);
-console.log(`🔑 EXPO_PUBLIC_FOURSQUARE_API_KEY: ${process.env.EXPO_PUBLIC_FOURSQUARE_API_KEY ? '***present***' : 'undefined'}`);
+import { getRecommendations } from './services/gemini';
 import { geocodeLocation, parseLocationFromQuery } from './services/geocoding';
-import { getHiddenPlaces, getCachedResults, saveCachedResults, clearCachedResults, getGridCachedResults, saveGridCachedResults, clearGridCache } from './services/storage';
-import { addToHistory } from './services/collections';
-import { trackSearch, trackPlaceView, getUsageStats, hasExceededFreeTier, getRemainingSearches, UsageStats, FREE_TIER_LIMITS, resetUsageStats } from './services/usage';
+import { getHiddenPlaces } from './services/storage';
 import { Coordinates, Place } from './types';
 import { PlaceCard } from './components/PlaceCard';
 import { CenterPiece } from './components/CenterPiece';
 import { LoadingScreen } from './components/LoadingScreen';
 import { PlacePopup } from './components/PlacePopup';
-import { UsageIndicator } from './components/UsageIndicator';
-import { UpgradePrompt } from './components/UpgradePrompt';
 import { FullScreenMap } from './components/FullScreenMap';
-import { SavedPlacesScreen } from './screens/SavedPlacesScreen';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Svg, Path, Circle } from 'react-native-svg';
-
-const Tab = createBottomTabNavigator();
 
 const { width, height } = Dimensions.get('window');
 
@@ -79,8 +63,7 @@ const AnimatedSpinner = () => {
   );
 };
 
-export function DiscoverScreen() {
-
+export default function App() {
   const [coords, setCoords] = useState<Coordinates | null>(null); // Current search center
   const [userGpsCoords, setUserGpsCoords] = useState<Coordinates | null>(null); // Original GPS location
   const [city, setCity] = useState<string>("Locating...");
@@ -96,25 +79,10 @@ export function DiscoverScreen() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showFullMap, setShowFullMap] = useState<boolean>(false);
   const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
-  const [currentRadius, setCurrentRadius] = useState<number>(3.2); // Track current search radius
+  const [currentRadius, setCurrentRadius] = useState<number>(4.8); // Track current search radius
   const [openNowFilter, setOpenNowFilter] = useState<boolean>(false); // Filter for places open now
   const [hotAndNewFilter, setHotAndNewFilter] = useState<boolean>(false); // Filter for trending/new places
-  const [categoryFilters, setCategoryFilters] = useState<Set<string>>(() => new Set()); // Active category filters (EAT, DRINK, SIGHT, DO) - use lazy initialization to prevent recreating Set on every render
-
-  // Memoize categoryFilters as a stable string for useCallback dependencies
-  const categoryFiltersKey = useMemo(() => Array.from(categoryFilters).sort().join(','), [categoryFilters]);
-  const pullDistanceRef = useRef<number>(0); // Track how far user has pulled up (use ref to avoid re-renders)
-  const [pullActive, setPullActive] = useState<boolean>(false); // Only for UI indicator
-  const [usageStats, setUsageStats] = useState<UsageStats | null>(null); // Usage tracking stats
-  const [showUpgradePrompt, setShowUpgradePrompt] = useState<boolean>(false); // Show upgrade prompt when limit reached
-  const [showMenu, setShowMenu] = useState<boolean>(false); // Show hamburger menu
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null); // Timestamp of last search
-  const [usingCachedData, setUsingCachedData] = useState<boolean>(false); // Whether showing cached data
-  // Removed pull-to-refresh - users scroll down to load more instead
-
-  // Track initial mount to prevent filter useEffects from firing on first load
-  const categoryFilterInitialMount = useRef(true);
-  const hotAndNewFilterInitialMount = useRef(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false); // Pull-to-refresh state
 
   // Determine nearest major city for iconic searches
   const getMajorCity = useCallback(() => {
@@ -154,19 +122,14 @@ export function DiscoverScreen() {
     return closestCity;
   }, [coords]);
 
-  // Memoize majorCity to prevent recalculation on every render
-  const majorCity = useMemo(() => getMajorCity(), [getMajorCity]);
+  const majorCity = getMajorCity();
 
   // Filter places based on "Open Now" toggle
   const filteredPlaces = useMemo(() => {
-    // DEBUG DISABLED: console.log(`🔍 Filter check: openNowFilter=${openNowFilter}, places.length=${places.length}`);
-    if (!openNowFilter) {
-      return places;
-    }
+    if (!openNowFilter) return places;
 
     // Only show places that are confirmed open
-    const openPlaces = places.filter(place => place.isOpen === true);
-    return openPlaces;
+    return places.filter(place => place.isOpen === true);
   }, [places, openNowFilter]);
 
   // Determine city scale for radius calculation
@@ -201,7 +164,7 @@ export function DiscoverScreen() {
 
   // Calculate search radius based on query keywords and city scale
   const getRadiusForQuery = useCallback((query?: string, searchLocation?: string): number => {
-    if (!query) return 3.2; // Default 2 miles
+    if (!query) return 4.8; // Default 3 miles
 
     const lowerQuery = query.toLowerCase();
 
@@ -244,24 +207,15 @@ export function DiscoverScreen() {
   }, [city, getMajorCityScale]);
 
   // Search suggestion templates showcasing different search patterns
-  const searchSuggestions = useMemo(() => [
+  const searchSuggestions = [
     majorCity.toLowerCase(), // Just location → iconic tourist destinations
     'pizza in nyc', // Category + city → specific search in city
     'coffee shops nearby', // Category nearby → tight 2-mile radius
     'restaurants near me', // Near me → resets to GPS location
     `iconic places in ${majorCity}`, // Explicit iconic → tourist mode
-  ], [majorCity]);
+  ];
 
   const fetchVibe = useCallback(async (latitude: number, longitude: number, query?: string, append: boolean = false, excludePlaces: string[] = []) => {
-    // Check free tier limits before searching (only for new searches, not appends)
-    if (!append) {
-      const exceeded = await hasExceededFreeTier();
-      if (exceeded) {
-        setShowUpgradePrompt(true);
-        return;
-      }
-    }
-
     if (append) {
       setLoadingMore(true);
     } else {
@@ -276,65 +230,16 @@ export function DiscoverScreen() {
       console.log(`🔥 Hot & New active - expanded radius to ${radiusKm}km to find trending spots in hot neighborhoods`);
     }
 
-    const categoriesArray = Array.from(categoryFilters);
-
-    // Adjust radius based on category type (DO and SIGHT venues are rarer)
-    if (categoriesArray.includes('DO')) {
-      radiusKm = Math.max(radiusKm, 8); // Min 8km (5 miles) for DO - activities are rare
-      console.log(`🎯 DO filter active - expanded radius to ${radiusKm}km to find activities`);
-    } else if (categoriesArray.includes('SIGHT')) {
-      radiusKm = Math.max(radiusKm, 4.8); // Min 4.8km (3 miles) for SIGHT - museums/landmarks are less common
-      console.log(`👁️ SIGHT filter active - expanded radius to ${radiusKm}km to find attractions`);
-    }
-
     setCurrentRadius(radiusKm); // Store current radius for display
     console.log(`🔍 Search radius: ${radiusKm}km (${(radiusKm * 0.621371).toFixed(1)} miles) for query: "${query || 'default'}" in ${city}`);
     try {
-      console.log(`🎯 Frontend: Passing categories to API:`, categoriesArray.length > 0 ? categoriesArray : 'none (all categories)');
-
-      // GRID CACHE: Check for cached results first
-      let data: { places: Place[]; city: string } | undefined;
-      let gridCacheHit = false;
-      if (!append) {
-        const categoryKey = categoriesArray.length === 1 ? categoriesArray[0] : undefined;
-        const cachedPlaces = await getGridCachedResults(latitude, longitude, categoryKey, query);
-
-        if (cachedPlaces && cachedPlaces.length > 0) {
-          console.log(`💾 GRID CACHE HIT: Using ${cachedPlaces.length} cached places (no API call!)`);
-          gridCacheHit = true;
-          // Use cached data in same format as API response
-          data = {
-            places: cachedPlaces,
-            city: city || 'Unknown', // Use current city name
-          };
-          // Don't set loading=false here - let it happen after setPlaces() to avoid race condition
-        }
-      }
-
-      // If no grid cache hit, call API
-      if (!gridCacheHit) {
-        // Use Foursquare for FREE searches when API key is available
-        if (USE_FOURSQUARE) {
-          console.log('🟣 Using Foursquare API (FREE tier - 10K calls/month)');
-          data = await getRecommendationsWithFoursquare({ latitude, longitude }, query, radiusKm, hotAndNewFilter, excludePlaces, categoriesArray);
-        } else {
-          console.log('🔵 Using Google Places API');
-          data = await getRecommendations({ latitude, longitude }, query, radiusKm, hotAndNewFilter, excludePlaces, categoriesArray);
-        }
-      }
-
-      // Early return if no data
-      if (!data) {
-        setError("Failed to get recommendations");
-        setLoading(false);
-        return;
-      }
-
+      const data = await getRecommendations({ latitude, longitude }, query, radiusKm, hotAndNewFilter, excludePlaces);
+      
       // Check if we're at the original GPS location (within ~100m)
-      const isAtGpsLocation = userGpsCoords &&
-        Math.abs(userGpsCoords.latitude - latitude) < 0.001 &&
+      const isAtGpsLocation = userGpsCoords && 
+        Math.abs(userGpsCoords.latitude - latitude) < 0.001 && 
         Math.abs(userGpsCoords.longitude - longitude) < 0.001;
-
+      
       if (isAtGpsLocation && userGpsCity) {
         // At original GPS location - always use the original city name
         setCity(userGpsCity);
@@ -346,7 +251,7 @@ export function DiscoverScreen() {
         // Different location (explicit search) - use new city name
         setCity(data.city);
       }
-
+      
       // Filter out hidden places
       const hiddenPlaces = await getHiddenPlaces();
       const filteredPlaces = data.places.filter(place => !hiddenPlaces.includes(place.name));
@@ -357,8 +262,8 @@ export function DiscoverScreen() {
           const existingNames = new Set(prev.map(p => p.name));
           const newPlaces = filteredPlaces.filter(p => !existingNames.has(p.name));
 
-          // If we got fewer than 8 new unique places, we've probably exhausted options
-          if (newPlaces.length < 8) {
+          // If we got fewer than 4 new unique places, we've probably exhausted options
+          if (newPlaces.length < 4) {
             setCanLoadMore(false);
           }
 
@@ -366,40 +271,10 @@ export function DiscoverScreen() {
         });
         // Track newly shown places
         setShownPlaces(prev => [...prev, ...filteredPlaces.map(p => p.name)]);
-        // Add to history
-        filteredPlaces.forEach(place => {
-          addToHistory(place, query, data.city);
-        });
       } else {
         setPlaces(filteredPlaces);
         // Track all shown places
         setShownPlaces(prev => [...prev, ...filteredPlaces.map(p => p.name)]);
-        // Add to history
-        filteredPlaces.forEach(place => {
-          addToHistory(place, query, data.city);
-        });
-
-        // Track search in usage stats
-        const updatedStats = await trackSearch();
-        setUsageStats(updatedStats);
-
-        // Show remaining searches
-        const remaining = await getRemainingSearches();
-        if (remaining <= 2 && remaining > 0) {
-          console.log(`⚠️ Only ${remaining} searches remaining in free tier`);
-        }
-
-        // Save results to cache
-        await saveCachedResults(filteredPlaces, data.city, latitude, longitude, query);
-
-        // Save to grid cache if this was a fresh API call
-        if (!gridCacheHit) {
-          const categoryKey = categoriesArray.length === 1 ? categoriesArray[0] : undefined;
-          await saveGridCachedResults(latitude, longitude, filteredPlaces, categoryKey, query);
-        }
-
-        setLastUpdated(Date.now());
-        setUsingCachedData(false);
       }
     } catch (err) {
       setError("Failed to get recommendations. AI might be tired.");
@@ -407,13 +282,24 @@ export function DiscoverScreen() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [userGpsCoords, userGpsCity, getRadiusForQuery, city, hotAndNewFilter, categoryFiltersKey]);
+  }, [userGpsCoords, userGpsCity, getRadiusForQuery, city, hotAndNewFilter]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!coords) return;
+    setRefreshing(true);
+    try {
+      // Pass previously shown places to get fresh variety
+      await fetchVibe(coords.latitude, coords.longitude, searchQuery || undefined, false, shownPlaces);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [coords, searchQuery, shownPlaces, fetchVibe]);
 
   const handleLocate = useCallback(async () => {
     setLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-
+      
       if (status !== 'granted') {
         setError("We need your location to find the vibe.");
         setLoading(false);
@@ -426,7 +312,7 @@ export function DiscoverScreen() {
       const gpsCoords = { latitude, longitude };
       setCoords(gpsCoords);
       setUserGpsCoords(gpsCoords);
-
+      
       // Get the actual city name from GPS coordinates using reverse geocoding
       const { reverseGeocode } = await import('./services/geocoding');
       const actualCity = await reverseGeocode(gpsCoords);
@@ -434,22 +320,8 @@ export function DiscoverScreen() {
         setUserGpsCity(actualCity);
         setCity(actualCity);
       }
-
-      // Try to load cached results first
-      const cached = await getCachedResults();
-      if (cached && cached.places.length > 0) {
-        console.log('📂 Using cached results - no search needed!');
-        setPlaces(cached.places);
-        setCity(cached.city);
-        setCoords({ latitude: cached.latitude, longitude: cached.longitude });
-        setLastUpdated(cached.timestamp);
-        setUsingCachedData(true);
-        setLoading(false);
-      } else {
-        // No cache - trigger automatic search
-        console.log('🔍 No cache found - triggering automatic search');
-        fetchVibe(latitude, longitude);
-      }
+      
+      fetchVibe(latitude, longitude);
     } catch (err) {
       setLoading(false);
       setError("We need your location to find the vibe.");
@@ -460,74 +332,16 @@ export function DiscoverScreen() {
   const handleLoadMore = useCallback(() => {
     if (loadingMore || !canLoadMore || !coords) return;
     console.log('🔄 Loading more places...');
-    fetchVibe(coords.latitude, coords.longitude, searchQuery || undefined, true, shownPlaces);
-  }, [loadingMore, canLoadMore, coords, searchQuery, fetchVibe, shownPlaces]);
-
-  const toggleCategoryFilter = useCallback((category: string) => {
-    setCategoryFilters(prev => {
-      // If clicking the same active filter, clear all filters
-      if (prev.has(category) && prev.size === 1) {
-        return new Set();
-      }
-      // Otherwise, set only this filter as active
-      return new Set([category]);
-    });
-  }, []);
-
-  // Trigger new search when category filters change
-  useEffect(() => {
-    // Skip on initial mount
-    if (categoryFilterInitialMount.current) {
-      categoryFilterInitialMount.current = false;
-      return;
-    }
-
-    if (coords && places.length > 0) {
-      console.log(`📁 Category filters changed: ${Array.from(categoryFilters).join(', ') || 'all'}`);
-      // Don't clear places immediately - let new results replace old ones
-      // This prevents the UI from showing empty state during the search
-      setShownPlaces([]);
-      setCanLoadMore(true);
-      fetchVibe(coords.latitude, coords.longitude, searchQuery || undefined);
-    }
-  }, [categoryFilters]);
+    fetchVibe(coords.latitude, coords.longitude, searchQuery || undefined, true);
+  }, [loadingMore, canLoadMore, coords, searchQuery, fetchVibe]);
 
   // Trigger new search when Hot & New filter changes
   useEffect(() => {
-    // Skip on initial mount
-    if (hotAndNewFilterInitialMount.current) {
-      hotAndNewFilterInitialMount.current = false;
-      return;
-    }
-
     if (coords && places.length > 0) {
       console.log(`🔥 Hot & New filter changed: ${hotAndNewFilter}`);
       fetchVibe(coords.latitude, coords.longitude, searchQuery || undefined, false);
     }
   }, [hotAndNewFilter]);
-
-  // Load usage stats on mount
-  useEffect(() => {
-    const loadStats = async () => {
-      const stats = await getUsageStats();
-      setUsageStats(stats);
-      console.log(`📊 Usage stats loaded: ${stats.searchCount}/${FREE_TIER_LIMITS.searchesPerMonth} searches used`);
-    };
-    loadStats();
-  }, []);
-
-  // Dev helper: expose reset function globally for testing
-  useEffect(() => {
-    if (__DEV__) {
-      (global as any).resetUsage = async () => {
-        await resetUsageStats();
-        const newStats = await getUsageStats();
-        setUsageStats(newStats);
-        console.log('✅ Usage reset! You have 5 fresh searches.');
-      };
-      console.log('💡 Dev mode: Type "resetUsage()" in console to reset your free tier');
-    }
-  }, []);
 
 
   if (!permissionGranted) {
@@ -560,9 +374,9 @@ export function DiscoverScreen() {
               style={styles.locateButton}
               activeOpacity={0.9}
             >
-              <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2}>
+              <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
                 <Path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-                <Circle cx={12} cy={10} r={3} />
+                <Circle cx="12" cy="10" r="3" />
               </Svg>
               <Text style={styles.locateButtonText}>Find My Vibe</Text>
             </TouchableOpacity>
@@ -574,11 +388,8 @@ export function DiscoverScreen() {
   }
 
   if (loading) {
-    console.log(`⏳ LOADING SCREEN SHOWN - blocking UI (loading=${loading})`);
     return <LoadingScreen status="Scanning social signals..." />;
   }
-
-  // DEBUG DISABLED: console.log(`✅ UI RENDERING - loading=${loading}, places=${places.length}, filteredPlaces=${filteredPlaces.length}`);
 
   // Calculate card dimensions based on screen
   const isSmall = width < 768;
@@ -810,17 +621,14 @@ export function DiscoverScreen() {
         <Text style={styles.headerTitle}>VibeCheck</Text>
         <TouchableOpacity
           style={styles.hamburgerButton}
-          onPress={() => setShowMenu(true)}
+          onPress={() => console.log('Menu pressed - TODO')}
           activeOpacity={0.7}
         >
-          <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#e2e8f0" strokeWidth={2} strokeLinecap="round">
+          <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#e2e8f0" strokeWidth="2" strokeLinecap="round">
             <Path d="M3 12h18M3 6h18M3 18h18" />
           </Svg>
         </TouchableOpacity>
       </View>
-
-      {/* Usage Indicator - Shows when ≤3 searches remaining */}
-      <UsageIndicator stats={usageStats} onUpgradePress={() => setShowUpgradePrompt(true)} />
 
       {/* Location Context Chip - Shows when searching different location */}
       {userGpsCoords && coords &&
@@ -828,9 +636,9 @@ export function DiscoverScreen() {
         Math.abs(userGpsCoords.longitude - coords.longitude) > 0.01) && (
         <View style={styles.locationContextContainer}>
           <View style={styles.locationContextChip}>
-            <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth={2}>
+            <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2">
               <Path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-              <Circle cx={12} cy={10} r={3} />
+              <Circle cx="12" cy="10" r="3" />
             </Svg>
             <Text style={styles.locationContextText}>Searching in {city}</Text>
             <TouchableOpacity
@@ -857,39 +665,20 @@ export function DiscoverScreen() {
       >
         <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={[styles.gridContainer, { padding, paddingTop: 4, paddingBottom: 8 }]}
+        contentContainerStyle={[styles.gridContainer, { padding, paddingTop: 8, paddingBottom: 16 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         bounces={true}
-        onScroll={(event) => {
-          const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-          const scrolledToBottom = contentOffset.y + layoutMeasurement.height;
-          const contentHeight = contentSize.height;
-
-          // Calculate how far they've pulled past the bottom
-          const overscroll = Math.max(0, scrolledToBottom - contentHeight);
-          pullDistanceRef.current = overscroll;
-
-          // Only update state when crossing threshold (for UI indicator)
-          const isPullActive = overscroll >= 80;
-          if (isPullActive !== pullActive) {
-            setPullActive(isPullActive);
-          }
-        }}
-        scrollEventThrottle={100}
-        onScrollEndDrag={() => {
-          const PULL_THRESHOLD = 80; // Need to pull 80px past bottom to trigger
-
-          // Trigger load if they pulled far enough
-          if (pullDistanceRef.current >= PULL_THRESHOLD && canLoadMore && !loadingMore && !loading) {
-            console.log(`📜 Pull threshold reached (${pullDistanceRef.current}px) - loading more...`);
-            handleLoadMore();
-          }
-
-          // Reset pull distance
-          pullDistanceRef.current = 0;
-          setPullActive(false);
-        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#FF6B9D"
+            colors={['#FF6B9D']}
+            title="Reshuffling vibe..."
+            titleColor="#FF6B9D"
+          />
+        }
       >
         {/* Radius Context Display */}
         {places.length > 0 && (
@@ -903,23 +692,6 @@ export function DiscoverScreen() {
                   : 'your location'
               }
             </Text>
-            {usingCachedData && lastUpdated && coords && (
-              <TouchableOpacity
-                style={styles.refreshButton}
-                onPress={() => fetchVibe(coords.latitude, coords.longitude)}
-                activeOpacity={0.7}
-              >
-                <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={2}>
-                  <Path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                  <Path d="M21 3v5h-5"/>
-                  <Path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                  <Path d="M3 21v-5h5"/>
-                </Svg>
-                <Text style={styles.refreshButtonText}>
-                  Refresh • Updated {Math.floor((Date.now() - lastUpdated) / (1000 * 60 * 60))}h ago
-                </Text>
-              </TouchableOpacity>
-            )}
           </View>
         )}
 
@@ -930,7 +702,7 @@ export function DiscoverScreen() {
             <View style={[styles.row, { gap }]}>
               {filteredPlaces.slice(0, 2).map((place, i) => (
                 <View key={place.id} style={{ width: cardWidth, height: cardHeight }}>
-                  <PlaceCard place={place} delay={i * 100} onSelect={setSelectedPlace} onHidePlace={handleHidePlace} coords={coords || undefined} index={i} />
+                  <PlaceCard place={place} delay={i * 100} onSelect={setSelectedPlace} onHidePlace={handleHidePlace} coords={coords || undefined} />
                 </View>
               ))}
             </View>
@@ -945,8 +717,6 @@ export function DiscoverScreen() {
                   isSearchedLocation={userGpsCoords !== null && coords !== null &&
                     (Math.abs(userGpsCoords.latitude - coords.latitude) > 0.01 ||
                      Math.abs(userGpsCoords.longitude - coords.longitude) > 0.01)}
-                  places={filteredPlaces}
-                  userGpsCoords={userGpsCoords}
                 />
               </View>
             </View>
@@ -956,43 +726,37 @@ export function DiscoverScreen() {
               <View key={`row-${rowIndex}`} style={[styles.row, { gap }]}>
                 {filteredPlaces.slice(2 + rowIndex * 2, 4 + rowIndex * 2).map((place, i) => (
                   <View key={place.id} style={{ width: cardWidth, height: cardHeight }}>
-                    <PlaceCard
-                      place={place}
-                      delay={0}
+                    <PlaceCard 
+                      place={place} 
+                      delay={0} 
                       onSelect={setSelectedPlace}
                       onHidePlace={handleHidePlace}
                       coords={coords || undefined}
-                      index={2 + rowIndex * 2 + i}
                     />
                   </View>
                 ))}
               </View>
             ))}
-
-            {/* Loading More Indicator or Pull Up Prompt */}
+            
+            {/* Load More - Pull Up or Tap */}
             {canLoadMore && (
               <View style={styles.loadMoreContainer}>
                 {loadingMore ? (
                   <View style={styles.loadingIndicator}>
                     <AnimatedSpinner />
-                    <Text style={styles.loadMoreText}>Loading 8 more places...</Text>
+                    <Text style={styles.loadMoreText}>Finding more places...</Text>
                   </View>
                 ) : (
-                  <View style={[styles.pullUpPrompt, pullActive && styles.pullUpPromptActive]}>
-                    <Svg
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke={pullActive ? "#10b981" : "#64748b"}
-                      strokeWidth={2}
-                    >
+                  <TouchableOpacity
+                    onPress={handleLoadMore}
+                    style={styles.pullUpIndicator}
+                    activeOpacity={0.7}
+                  >
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
                       <Path d="M12 19V5M5 12l7-7 7 7" />
                     </Svg>
-                    <Text style={[styles.pullUpText, pullActive && styles.pullUpTextActive]}>
-                      {pullActive ? "Release to load 8 more" : "Pull up to get more results"}
-                    </Text>
-                  </View>
+                    <Text style={styles.pullUpText}>Tap to load more</Text>
+                  </TouchableOpacity>
                 )}
               </View>
             )}
@@ -1016,8 +780,6 @@ export function DiscoverScreen() {
                           isSearchedLocation={userGpsCoords !== null && coords !== null &&
                             (Math.abs(userGpsCoords.latitude - coords.latitude) > 0.01 ||
                              Math.abs(userGpsCoords.longitude - coords.longitude) > 0.01)}
-                          places={filteredPlaces}
-                          userGpsCoords={userGpsCoords}
                         />
                       </View>
                     );
@@ -1031,13 +793,12 @@ export function DiscoverScreen() {
                   
                   return (
                     <View key={place.id} style={{ width: cardWidth, height: cardHeight }}>
-                      <PlaceCard
-                        place={place}
-                        delay={placeIndex * 100}
+                      <PlaceCard 
+                        place={place} 
+                        delay={placeIndex * 100} 
                         onSelect={setSelectedPlace}
                         onHidePlace={handleHidePlace}
                         coords={coords || undefined}
-                        index={placeIndex}
                       />
                     </View>
                   );
@@ -1052,8 +813,8 @@ export function DiscoverScreen() {
         <View style={styles.searchContainer}>
           <View style={styles.searchBarRow}>
             <View style={[styles.searchBar, showSuggestions && styles.searchBarFocused]}>
-              <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth={2}>
-                <Circle cx={11} cy={11} r={8} />
+              <Svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2">
+                <Circle cx="11" cy="11" r="8" />
                 <Path d="m21 21-4.35-4.35" />
               </Svg>
               <TextInput
@@ -1086,44 +847,7 @@ export function DiscoverScreen() {
 
           {/* Filter Toggles */}
           {!showSuggestions && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.filterChipsContainer}
-              contentContainerStyle={styles.filterChipsContent}
-            >
-              {/* Category Filter Toggles - Eat, See, Drink, Do */}
-              {['EAT', 'SIGHT', 'DRINK', 'DO'].map(category => {
-                const displayName = category === 'SIGHT' ? 'See' : category.charAt(0) + category.slice(1).toLowerCase();
-                return (
-                  <TouchableOpacity
-                    key={category}
-                    style={[styles.filterChip, categoryFilters.has(category) && styles.filterChipActive]}
-                    onPress={() => toggleCategoryFilter(category)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.filterChipText, categoryFilters.has(category) && styles.filterChipTextActive]}>
-                      {displayName}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-
-              {/* Open Now Filter Toggle */}
-              <TouchableOpacity
-                style={[styles.filterChip, openNowFilter && styles.filterChipActive]}
-                onPress={() => setOpenNowFilter(!openNowFilter)}
-                activeOpacity={0.7}
-              >
-                <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={openNowFilter ? "#10b981" : "#64748b"} strokeWidth={2} style={{ marginRight: 6 }}>
-                  <Circle cx={12} cy={12} r={10} />
-                  <Path d="M12 6v6l4 2" />
-                </Svg>
-                <Text style={[styles.filterChipText, openNowFilter && styles.filterChipTextActive]}>
-                  Open Now
-                </Text>
-              </TouchableOpacity>
-
+            <View style={styles.filterChipsContainer}>
               {/* Hot & New Filter Toggle */}
               <TouchableOpacity
                 style={[styles.filterChip, hotAndNewFilter && styles.filterChipActive, hotAndNewFilter && styles.hotAndNewChipActive]}
@@ -1135,7 +859,22 @@ export function DiscoverScreen() {
                   Hot & New
                 </Text>
               </TouchableOpacity>
-            </ScrollView>
+
+              {/* Open Now Filter Toggle */}
+              <TouchableOpacity
+                style={[styles.filterChip, openNowFilter && styles.filterChipActive]}
+                onPress={() => setOpenNowFilter(!openNowFilter)}
+                activeOpacity={0.7}
+              >
+                <Svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={openNowFilter ? "#10b981" : "#64748b"} strokeWidth="2" style={{ marginRight: 6 }}>
+                  <Circle cx="12" cy="12" r="10" />
+                  <Path d="M12 6v6l4 2" />
+                </Svg>
+                <Text style={[styles.filterChipText, openNowFilter && styles.filterChipTextActive]}>
+                  Open Now
+                </Text>
+              </TouchableOpacity>
+            </View>
           )}
 
           {/* Search Suggestions Dropdown - Floating above search bar */}
@@ -1158,8 +897,8 @@ export function DiscoverScreen() {
                     onPress={() => handleSuggestionClick(suggestion)}
                     activeOpacity={0.6}
                   >
-                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth={2} style={{ marginRight: 12 }}>
-                      <Circle cx={11} cy={11} r={8} />
+                    <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" style={{ marginRight: 12 }}>
+                      <Circle cx="11" cy="11" r="8" />
                       <Path d="m21 21-4.35-4.35" />
                     </Svg>
                     <Text style={styles.suggestionItemText}>{suggestion}</Text>
@@ -1189,190 +928,11 @@ export function DiscoverScreen() {
 
         {/* Popup Modal */}
         {selectedPlace && (
-          <PlacePopup
-            place={selectedPlace}
-            onClose={() => setSelectedPlace(null)}
+          <PlacePopup 
+            place={selectedPlace} 
+            onClose={() => setSelectedPlace(null)} 
           />
         )}
-
-        {/* Upgrade Prompt Modal */}
-        <UpgradePrompt
-          visible={showUpgradePrompt}
-          stats={usageStats}
-          onClose={() => setShowUpgradePrompt(false)}
-          onUpgrade={() => {
-            // TODO: Integrate payment processor (Stripe, RevenueCat, etc.)
-            console.log('💳 Upgrade to Premium - Payment integration pending');
-            setShowUpgradePrompt(false);
-          }}
-        />
-
-        {/* Hamburger Menu Modal */}
-        <Modal
-          visible={showMenu}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowMenu(false)}
-        >
-          <View style={styles.menuOverlay}>
-            <TouchableOpacity
-              style={styles.menuBackdrop}
-              activeOpacity={1}
-              onPress={() => setShowMenu(false)}
-            />
-
-            <View style={styles.menuContainer}>
-                <View style={styles.menuHeader}>
-                  <Text style={styles.menuTitle}>Menu</Text>
-                  <TouchableOpacity onPress={() => setShowMenu(false)} style={styles.menuCloseButton}>
-                    <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth={2}>
-                      <Path d="M18 6 6 18"/>
-                      <Path d="m6 6 12 12"/>
-                    </Svg>
-                  </TouchableOpacity>
-                </View>
-
-                <ScrollView style={styles.menuContent} showsVerticalScrollIndicator={false}>
-                  {/* Usage Stats Section */}
-                  <View style={styles.menuSection}>
-                    <Text style={styles.menuSectionTitle}>USAGE STATS</Text>
-                    <View style={styles.statsCard}>
-                      <View style={styles.statRow}>
-                        <Text style={styles.statLabel}>Searches this month</Text>
-                        <Text style={styles.statValue}>
-                          {usageStats?.searchCount || 0} / {FREE_TIER_LIMITS.searchesPerMonth}
-                        </Text>
-                      </View>
-                      <View style={styles.statRow}>
-                        <Text style={styles.statLabel}>Remaining searches</Text>
-                        <Text style={[styles.statValue, { color: (FREE_TIER_LIMITS.searchesPerMonth - (usageStats?.searchCount || 0)) <= 2 ? '#f87171' : '#10b981' }]}>
-                          {Math.max(0, FREE_TIER_LIMITS.searchesPerMonth - (usageStats?.searchCount || 0))}
-                        </Text>
-                      </View>
-                      <View style={styles.statRow}>
-                        <Text style={styles.statLabel}>Places viewed</Text>
-                        <Text style={styles.statValue}>{usageStats?.placeViewCount || 0}</Text>
-                      </View>
-                      <View style={styles.statRow}>
-                        <Text style={styles.statLabel}>Total searches (all time)</Text>
-                        <Text style={styles.statValue}>{usageStats?.totalSearchesAllTime || 0}</Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Actions Section */}
-                  <View style={styles.menuSection}>
-                    <Text style={styles.menuSectionTitle}>ACTIONS</Text>
-
-                    <TouchableOpacity
-                      style={styles.menuButton}
-                      onPress={() => {
-                        setShowMenu(false);
-                        setShowUpgradePrompt(true);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.menuButtonContent}>
-                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth={2}>
-                          <Path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                          <Path d="M2 17l10 5 10-5"/>
-                          <Path d="M2 12l10 5 10-5"/>
-                        </Svg>
-                        <View style={styles.menuButtonText}>
-                          <Text style={styles.menuButtonTitle}>Upgrade to Premium</Text>
-                          <Text style={styles.menuButtonSubtitle}>Unlimited searches for $4.99/mo</Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.menuButton}
-                      onPress={async () => {
-                        await resetUsageStats();
-                        const newStats = await getUsageStats();
-                        setUsageStats(newStats);
-                        setShowMenu(false);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.menuButtonContent}>
-                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth={2}>
-                          <Path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
-                          <Path d="M21 3v5h-5"/>
-                          <Path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                          <Path d="M3 21v-5h5"/>
-                        </Svg>
-                        <View style={styles.menuButtonText}>
-                          <Text style={styles.menuButtonTitle}>Reset Usage Stats</Text>
-                          <Text style={styles.menuButtonSubtitle}>For testing purposes</Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.menuButton}
-                      onPress={async () => {
-                        await clearCachedResults();
-                        setUsingCachedData(false);
-                        setLastUpdated(null);
-                        setShowMenu(false);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.menuButtonContent}>
-                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth={2}>
-                          <Path d="M3 6h18"/>
-                          <Path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
-                          <Path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
-                        </Svg>
-                        <View style={styles.menuButtonText}>
-                          <Text style={styles.menuButtonTitle}>Clear Cached Results</Text>
-                          <Text style={styles.menuButtonSubtitle}>Force refresh on next load</Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.menuButton}
-                      onPress={async () => {
-                        await clearGridCache();
-                        Alert.alert('Cache Cleared', 'Grid cache has been cleared. Next search will be fresh!', [{ text: 'OK' }]);
-                        setShowMenu(false);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.menuButtonContent}>
-                        <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" strokeWidth={2}>
-                          <Path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                          <Path d="M3.27 6.96 12 12.01l8.73-5.05"/>
-                          <Path d="M12 22.08V12"/>
-                        </Svg>
-                        <View style={styles.menuButtonText}>
-                          <Text style={styles.menuButtonTitle}>Clear Grid Cache</Text>
-                          <Text style={styles.menuButtonSubtitle}>Clear location-based cache (~60% savings)</Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* About Section */}
-                  <View style={styles.menuSection}>
-                    <Text style={styles.menuSectionTitle}>ABOUT</Text>
-                    <View style={styles.aboutCard}>
-                      <Text style={styles.aboutTitle}>VibeCheck</Text>
-                      <Text style={styles.aboutVersion}>Version 1.0.0</Text>
-                      <Text style={styles.aboutDescription}>
-                        AI-powered place discovery with real-time data from Google Places API.
-                      </Text>
-                      <Text style={styles.aboutTech}>
-                        Powered by Gemini 2.5 Flash-Lite
-                      </Text>
-                    </View>
-                  </View>
-                </ScrollView>
-            </View>
-          </View>
-        </Modal>
     </SafeAreaView>
   );
 }
@@ -1518,30 +1078,12 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingBottom: 8,
     marginBottom: 8,
-    alignItems: 'center',
   },
   radiusContextText: {
     fontSize: 13,
     color: '#94a3b8',
     fontWeight: '500',
     textAlign: 'center',
-  },
-  refreshButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.3)',
-    marginTop: 8,
-  },
-  refreshButtonText: {
-    fontSize: 12,
-    color: '#3b82f6',
-    fontWeight: '600',
   },
   scrollView: {
     flex: 1,
@@ -1639,21 +1181,16 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   filterChipsContainer: {
-    marginTop: 12,
-  },
-  filterChipsContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 20,
+    marginTop: 12,
   },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    minWidth: 80,
     borderRadius: 20,
     backgroundColor: 'rgba(30, 41, 59, 0.6)',
     borderWidth: 1,
@@ -1721,214 +1258,22 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   loadingIndicator: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingVertical: 20,
-  },
-  pullUpPrompt: {
-    flexDirection: 'column',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 16,
-    opacity: 0.6,
   },
-  pullUpPromptActive: {
-    opacity: 1,
+  pullUpIndicator: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 24,
   },
   pullUpText: {
     fontSize: 13,
-    color: '#94a3b8',
-    fontWeight: '500',
-  },
-  pullUpTextActive: {
-    color: '#10b981',
-    fontWeight: '600',
-  },
-  menuOverlay: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: 'transparent',
-  },
-  menuBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  menuContainer: {
-    width: 320,
-    backgroundColor: '#1e293b',
-    borderLeftWidth: 1,
-    borderColor: 'rgba(71, 85, 105, 0.5)',
-    borderTopLeftRadius: 24,
-    borderBottomLeftRadius: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: -2, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  menuHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(71, 85, 105, 0.3)',
-  },
-  menuTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#e2e8f0',
-  },
-  menuCloseButton: {
-    padding: 4,
-  },
-  menuContent: {
-    flex: 1,
-  },
-  menuSection: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(71, 85, 105, 0.3)',
-  },
-  menuSectionTitle: {
-    fontSize: 11,
-    fontWeight: 'bold',
-    color: '#94a3b8',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 12,
-  },
-  statsCard: {
-    backgroundColor: 'rgba(30, 41, 59, 0.5)',
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(71, 85, 105, 0.5)',
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  statLabel: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    fontWeight: '500',
-  },
-  statValue: {
-    fontSize: 16,
-    color: '#e2e8f0',
-    fontWeight: 'bold',
-  },
-  menuButton: {
-    backgroundColor: 'rgba(30, 41, 59, 0.5)',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(71, 85, 105, 0.5)',
-  },
-  menuButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  menuButtonText: {
-    flex: 1,
-  },
-  menuButtonTitle: {
-    fontSize: 16,
-    color: '#e2e8f0',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  menuButtonSubtitle: {
-    fontSize: 13,
-    color: '#94a3b8',
-  },
-  aboutCard: {
-    backgroundColor: 'rgba(30, 41, 59, 0.5)',
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(71, 85, 105, 0.5)',
-  },
-  aboutTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#818cf8',
-    marginBottom: 4,
-  },
-  aboutVersion: {
-    fontSize: 13,
     color: '#64748b',
-    marginBottom: 12,
-  },
-  aboutDescription: {
-    fontSize: 14,
-    color: '#cbd5e1',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 12,
-  },
-  aboutTech: {
-    fontSize: 12,
-    color: '#818cf8',
-    fontWeight: '600',
+    fontWeight: '500',
   },
 });
-
-// App wrapper with bottom tab navigation
-export default function App() {
-  return (
-    <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={{
-          tabBarStyle: {
-            backgroundColor: '#020617',
-            borderTopColor: 'rgba(51, 65, 85, 0.5)',
-            borderTopWidth: 1,
-            height: 60,
-            paddingBottom: 8,
-            paddingTop: 8,
-          },
-          tabBarActiveTintColor: '#6366f1',
-          tabBarInactiveTintColor: '#64748b',
-          headerShown: false,
-        }}
-      >
-        <Tab.Screen
-          name="Discover"
-          component={DiscoverScreen}
-          options={{
-            tabBarIcon: ({ color, size }) => (
-              <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
-                <Circle cx={11} cy={11} r={8} />
-                <Path d="m21 21-4.35-4.35" />
-              </Svg>
-            ),
-          }}
-        />
-        <Tab.Screen
-          name="Saved"
-          component={SavedPlacesScreen}
-          options={{
-            tabBarIcon: ({ color, size }) => (
-              <Svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={2}>
-                <Path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-              </Svg>
-            ),
-          }}
-        />
-      </Tab.Navigator>
-    </NavigationContainer>
-  );
-}

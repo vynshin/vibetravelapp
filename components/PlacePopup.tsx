@@ -1,21 +1,23 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  Image, 
-  Modal, 
-  TouchableOpacity, 
-  ScrollView, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  Image,
+  Modal,
+  TouchableOpacity,
+  ScrollView,
+  StyleSheet,
   Dimensions,
-  Linking,
   Animated,
-  PanResponder
+  PanResponder,
+  Linking
 } from 'react-native';
 import { Place, PlaceCategory } from '../types';
 import { fetchWikiImage } from '../services/wikipedia';
 import { getPlacePhotos } from '../services/places';
+import { generateTipsForPlace } from '../services/gemini';
+import { trackPlaceView } from '../services/usage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Svg, Path, Circle, Line, Polyline } from 'react-native-svg';
 
@@ -44,7 +46,7 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
   const [fetchedImages, setFetchedImages] = useState<string[]>([]);
   const [loadingImages, setLoadingImages] = useState(true);
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
-  
+
   const translateY = useRef(new Animated.Value(0)).current;
   const currentPosition = useRef(SHEET_HEIGHT_EXPANDED - SHEET_HEIGHT_INITIAL);
   const scrollViewRef = useRef<ScrollView>(null);
@@ -54,6 +56,10 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
   const [fullScreenIndex, setFullScreenIndex] = useState(0);
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null);
   const fullScreenTranslateY = useRef(new Animated.Value(0)).current;
+
+  // Lazy-load tips state
+  const [tips, setTips] = useState<string[]>(place.knowBeforeYouGo || []);
+  const [loadingTips, setLoadingTips] = useState(false);
   
   const fullScreenPanResponder = useRef(
     PanResponder.create({
@@ -181,6 +187,11 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
     }).start();
   }, []);
 
+  // Track place view
+  useEffect(() => {
+    trackPlaceView();
+  }, []);
+
   // Scroll to selected image when full screen opens
   const fullScreenScrollRef = useRef<ScrollView>(null);
   useEffect(() => {
@@ -233,6 +244,30 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
     };
     fetchPhotos();
   }, [place.name, place.images, userCoords]);
+
+  // Lazy-load tips when component mounts (if not already present)
+  useEffect(() => {
+    const loadTips = async () => {
+      // Only load if tips are not already present
+      if (!place.knowBeforeYouGo || place.knowBeforeYouGo.length === 0) {
+        setLoadingTips(true);
+        try {
+          const generatedTips = await generateTipsForPlace({
+            name: place.name,
+            category: place.category,
+            address: place.address
+          });
+          setTips(generatedTips);
+        } catch (error) {
+          console.error('Failed to load tips:', error);
+          setTips([]);
+        } finally {
+          setLoadingTips(false);
+        }
+      }
+    };
+    loadTips();
+  }, [place.name]);
 
   // Combine fetched images with fallbacks (7 images)
   const fallbackImages = [
@@ -346,7 +381,7 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
               onPress={onClose}
               style={styles.closeButton}
             >
-              <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+              <Svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2}>
                 <Path d="M18 6 6 18"/>
                 <Path d="m6 6 12 12"/>
               </Svg>
@@ -400,6 +435,36 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
               )}
             </View>
 
+            {/* Know Before You Go Tips */}
+            {loadingTips && (
+              <View style={styles.tipsSection}>
+                <View style={styles.tipsTitleRow}>
+                  <Text style={styles.tipsIcon}>💡</Text>
+                  <Text style={styles.tipsTitle}>KNOW BEFORE YOU GO</Text>
+                </View>
+                <View style={styles.loadingTipsContainer}>
+                  <View style={styles.tipsSpinner} />
+                  <Text style={styles.loadingTipsText}>Loading tips...</Text>
+                </View>
+              </View>
+            )}
+            {!loadingTips && tips.length > 0 && (
+              <View style={styles.tipsSection}>
+                <View style={styles.tipsTitleRow}>
+                  <Text style={styles.tipsIcon}>💡</Text>
+                  <Text style={styles.tipsTitle}>KNOW BEFORE YOU GO</Text>
+                </View>
+                <View style={styles.tipsContainer}>
+                  {tips.map((tip, idx) => (
+                    <View key={idx} style={styles.tipItem}>
+                      <Text style={styles.tipBullet}>•</Text>
+                      <Text style={styles.tipText}>{tip}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+
             {/* Reviews */}
             {place.reviews && place.reviews.length > 0 && (
               <View style={styles.reviewsSection}>
@@ -437,7 +502,7 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
               style={styles.actionButton}
             >
               <Text style={styles.actionButtonText}>Get Directions</Text>
-              <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2">
+              <Svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth={2}>
                 <Path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                 <Polyline points="15 3 21 3 21 9" />
                 <Line x1="10" y1="14" x2="21" y2="3" />
@@ -508,7 +573,7 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
               style={styles.fullScreenClose}
               onPress={() => setFullScreenImage(null)}
             >
-              <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+              <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2}>
                 <Path d="M18 6 6 18"/>
                 <Path d="m6 6 12 12"/>
               </Svg>
@@ -780,6 +845,71 @@ const styles = StyleSheet.create({
     color: '#fbbf24',
     lineHeight: 22,
     fontWeight: '600',
+  },
+  tipsSection: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(99, 102, 241, 0.08)',
+    borderRadius: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(99, 102, 241, 0.2)',
+  },
+  tipsTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tipsIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  tipsTitle: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    color: '#a5b4fc',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  tipsContainer: {
+    gap: 10,
+  },
+  tipItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  tipBullet: {
+    fontSize: 16,
+    color: '#818cf8',
+    marginRight: 10,
+    lineHeight: 20,
+  },
+  tipText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#e2e8f0',
+    lineHeight: 20,
+  },
+  loadingTipsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  tipsSpinner: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: '#818cf8',
+    borderTopColor: 'transparent',
+    borderRadius: 10,
+  },
+  loadingTipsText: {
+    fontSize: 14,
+    color: '#94a3b8',
+    fontStyle: 'italic',
   },
   reviewsSection: {
     marginBottom: 16,

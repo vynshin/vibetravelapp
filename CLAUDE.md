@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VibeCheck Travel is an Expo/React Native mobile app that uses Gemini AI to discover trending places around the user's location. The app provides location-based recommendations with a "vibe mode" filter (iconic/mixed/local) that adjusts the search radius and recommendation style.
+VibeCheck Travel is an Expo/React Native mobile app that uses Gemini AI to discover trending places around the user's location. The app provides location-based recommendations with search suggestions that help users find specific types of places (iconic landmarks, local spots, restaurants, cafes, sights, etc.).
 
 ## Development Commands
 
@@ -38,10 +38,15 @@ Note: The same Gemini API key is reused for Google Maps/Places APIs.
 
 2. **Place Recommendations** (services/gemini.ts)
    - `getRecommendations()` calls Gemini 2.0 Flash with Google Maps grounding
+   - Uses **variable radius** based on search query (App.tsx:122-149):
+     - "iconic", "famous", "landmark" queries → 8km (5 miles) - needs wider search for landmarks
+     - "in [city]" queries → 8km (5 miles) - exploring a city
+     - "nearby", "around here", "close by" → 3.2km (2 miles) - truly local
+     - "local", "neighborhood", "near me" → 4.8km (3 miles) - moderate
+     - Default → 4.8km (3 miles)
    - Prompts are dynamically constructed based on:
-     - `vibeMode`: 'iconic' (5mi radius, famous landmarks), 'mixed' (3mi, balanced), 'local' (2mi, hidden gems)
      - `searchQuery`: Optional user search that can include location (parsed by geocoding.ts)
-     - `radiusKm`: Distance filter that corresponds to vibe mode
+     - Search query can specify "iconic" or "local" to affect which places are prioritized
    - AI returns 8 places with structured data (name, category, rating, reviews, address, signature items)
    - Each place is validated via Google Places API to ensure it exists and is within radius
    - Places beyond radius are sorted by distance and used as fallback if needed
@@ -69,13 +74,13 @@ All state is managed in App.tsx via React hooks (no Redux/Context):
 - `userGpsCoords`: Original GPS location (fixed per session)
 - `city` / `userGpsCity`: Display names for locations
 - `places[]`: Current recommendation list
-- `vibeMode`: 'iconic' | 'mixed' | 'local' (persisted to AsyncStorage)
 - `searchQuery`: Current search text
+- `showSuggestions`: Boolean to show/hide search suggestion chips
 - Hidden places stored in AsyncStorage, filtered from results
 
 ### Component Structure
 
-- **App.tsx**: Main container, handles location, search, vibe filtering, load-more
+- **App.tsx**: Main container, handles location, search, search suggestions, load-more
 - **PlaceCard.tsx**: Individual place card with image carousel, category badge, action sheet
 - **CenterPiece.tsx**: Center map component with refresh button
 - **PlacePopup.tsx**: Full-screen modal with detailed place info and reviews
@@ -83,14 +88,20 @@ All state is managed in App.tsx via React hooks (no Redux/Context):
 - **LoadingScreen.tsx**: Animated loading state
 - **PlaceActionSheet.tsx**: Bottom sheet for save/hide/directions actions
 
-### Vibe Mode System
+### Search Suggestion System
 
-The vibe filter (App.tsx:78-87, services/gemini.ts:101-116) controls:
-- **Iconic Mode**: 5mi/8km radius, prioritizes famous landmarks (2000+ reviews), focuses on SIGHT/DO categories
-- **Mixed Mode**: 3mi/4.8km radius, balanced 4 famous + 4 local spots
-- **Local Mode**: 2mi/3.2km radius, hidden gems (50-500 reviews, 4.5+ stars)
-
-Search queries override vibe mode - relevance to query takes priority, vibe only affects which matching places to show.
+When the user focuses the search bar, a dropdown list of suggestions appears above it (App.tsx:152-159):
+- Uses **smart major city detection** - finds nearest major city for "iconic" searches (so Everett → Boston)
+- Suggestions are optimized for variable radius:
+  - "iconic places in Boston" → 5 mile radius, geocodes to Boston
+  - "local favorites near me" → 3 mile radius from GPS
+  - "coffee shops nearby" → 2 mile radius for truly close results
+  - "top restaurants near me" → 3 mile radius
+  - "bars around here" → 2 mile radius
+  - "parks and outdoor spots nearby" → 2 mile radius
+- Clicking a suggestion populates the search bar (does NOT auto-search)
+- User can modify the text and press Enter to search
+- Cancel button dismisses keyboard and closes suggestions
 
 ### Category System
 
@@ -135,9 +146,9 @@ Pull-to-load implementation (App.tsx:180-197):
 
 ### Location Handling
 - Distinguishes between GPS location (`userGpsCoords`) and search center (`coords`)
-- Shows "Reset to my location" button when viewing different location (App.tsx:406-424)
 - Uses ±0.01 lat/lng threshold (~1km) to detect location changes
 - Preserves original GPS city name when returning to GPS location
+- Search suggestions dynamically update with current city name
 
 ### Performance Optimizations
 - Image loading with multiple fallbacks prevents broken images
@@ -154,11 +165,12 @@ Pull-to-load implementation (App.tsx:180-197):
 4. Use try-catch with console.error for error handling
 
 ### Modifying Gemini Prompts
-The prompt in gemini.ts:132-172 is critical. When modifying:
+The prompt in gemini.ts is critical. When modifying:
 - Maintain strict format requirements (pipe-delimited lines)
 - Keep CRITICAL REQUIREMENTS section for quality control
-- Test with different vibe modes and search queries
+- Test with different search queries (iconic, local, category-specific)
 - Validate that category mix matches expectations
+- Remember the radius is **variable** based on query - test with different radius values
 
 ### Working with AsyncStorage
 Use the helpers in services/storage.ts:

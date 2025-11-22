@@ -49,9 +49,9 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status }) => {
         <View style={styles.outerBorder} />
         <Animated.View style={[styles.spinnerBorder, { transform: [{ rotate: spin }] }]} />
         <Animated.View style={[styles.innerContent, { transform: [{ scale: pulseAnim }] }]}>
-          <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="2">
+          <Svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth={2}>
             <Path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-            <Circle cx="12" cy="10" r="3" />
+            <Circle cx={12} cy={10} r={3} />
           </Svg>
         </Animated.View>
       </View>

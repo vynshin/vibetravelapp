@@ -18,6 +18,18 @@ export interface Review {
   type: 'user' | 'critic';
 }
 
+// DISABLED: Cost optimization - using Google ratings only (saves ~$0.08/search)
+// export interface AggregatedRatings {
+//   googleRating?: number;
+//   yelpRating?: number;
+//   tripadvisorRating?: number;
+//   openTableRating?: number;
+//   michelinStars?: number;
+//   eaterMention?: boolean;
+//   averageRating?: number;
+//   totalSources: number;
+// }
+
 export interface Place {
   id: string;
   name: string;
@@ -32,6 +44,10 @@ export interface Place {
   phone?: string; // Phone number
   reviews: Review[];
   images: string[]; // Initially empty from Gemini, filled by Google Maps API
+  isOpen?: boolean; // Whether the place is currently open (from Google Places API)
+  knowBeforeYouGo?: string[]; // AI-generated practical tips (3-5 tips)
+  // aggregatedRatings?: AggregatedRatings; // DISABLED: Cost optimization - using Google ratings only
+  // compositeScore?: number; // DISABLED: Not needed without aggregated ratings
 }
 
 export interface LocationState {
@@ -39,4 +55,20 @@ export interface LocationState {
   city: string | null;
   error: string | null;
   loading: boolean;
+}
+
+export interface Collection {
+  id: string;
+  name: string;
+  icon?: string; // Emoji icon
+  placeIds: string[]; // IDs of places in this collection
+  createdAt: number; // Timestamp
+  updatedAt: number; // Timestamp
+}
+
+export interface HistoryEntry {
+  place: Place;
+  viewedAt: number; // Timestamp
+  searchQuery?: string; // What query led to this discovery
+  location: string; // City/area where it was discovered
 }
