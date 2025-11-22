@@ -175,7 +175,8 @@ export async function searchFoursquarePlaces(
       radius: validRadius.toString(),
       limit: limit.toString(),
       sort: 'RELEVANCE',
-      fields: 'name,location,categories,distance,rating,stats,hours,tel,website,price,photos,popularity',
+      // NOTE: Not specifying 'fields' to get ALL default fields including geocodes
+      // When fields is specified, Foursquare doesn't return geocodes (API limitation)
     });
 
     // Add category filter
@@ -222,21 +223,19 @@ export async function searchFoursquarePlaces(
 
     console.log(`✅ Foursquare found ${places.length} places`);
 
-    // Debug: Log raw first place to see all returned fields
+    // Debug: Check for geocodes in first place
     if (places.length > 0) {
-      console.log('🔍 RAW First Foursquare place:', JSON.stringify(places[0], null, 2));
-    }
-
-    // Debug: Log sample categories, photos, and geocodes
-    if (places.length > 0) {
-      console.log('📂 Sample Foursquare data:');
-      places.slice(0, 3).forEach((p: FoursquarePlace) => {
-        const catNames = p.categories?.map(c => `${c.name} (${c.fsq_category_id})`).join(', ') || 'none';
-        const photoCount = p.photos?.length || 0;
-        const hasGeocodes = p.geocodes?.main ? 'YES' : 'NO';
-        const coords = p.geocodes?.main ? `${p.geocodes.main.latitude},${p.geocodes.main.longitude}` : 'none';
-        console.log(`  - ${p.name}: ${catNames} [${photoCount} photos] [geocodes: ${hasGeocodes} ${coords}]`);
-      });
+      const firstPlace = places[0];
+      const hasGeocodes = firstPlace.geocodes?.main ? 'YES' : 'NO';
+      const coords = firstPlace.geocodes?.main
+        ? `${firstPlace.geocodes.main.latitude},${firstPlace.geocodes.main.longitude}`
+        : 'NOT FOUND';
+      console.log(`🔍 GEOCODES CHECK: ${hasGeocodes} - ${coords}`);
+      console.log(`🔍 First place name: ${firstPlace.name}`);
+      console.log(`🔍 Has location: ${firstPlace.location ? 'YES' : 'NO'}`);
+      if (firstPlace.location) {
+        console.log(`🔍 Address: ${firstPlace.location.formatted_address || 'none'}`);
+      }
     }
 
     return places;
