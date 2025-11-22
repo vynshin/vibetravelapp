@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Place, PlaceCategory } from '../types';
 import { fetchWikiImage } from '../services/wikipedia';
-import { getPlacePhotos } from '../services/places';
+// Google Places API removed - too expensive ($300/day in testing)
 import { generateTipsForPlace } from '../services/gemini';
 import { trackPlaceView } from '../services/usage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -207,19 +207,12 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
   useEffect(() => {
     const fetchPhotos = async () => {
         setLoadingImages(true);
-        
+
         let photos: string[] = [];
-        
-        // Try Google Places photos if we have coordinates
-        if (userCoords) {
-          const placesPhotos = await getPlacePhotos(place.name, userCoords.latitude, userCoords.longitude);
-          if (placesPhotos.length > 0) {
-            // Take only the first 8 unique photos to avoid duplicates
-            const uniquePhotos = Array.from(new Set(placesPhotos)).slice(0, 8);
-            photos = [...uniquePhotos];
-          }
-        }
-        
+
+        // DISABLED: Google Places API calls are too expensive ($300/day in testing)
+        // Photos now come only from Foursquare/OSM via place.images
+
         // Try Wikipedia ONLY for landmarks/sights (restaurants rarely have wiki pages and names can be ambiguous)
         if (place.category === PlaceCategory.SIGHT || place.category === PlaceCategory.DO) {
           const wikiImage = await fetchWikiImage(place.name);
@@ -228,14 +221,14 @@ export const PlacePopup: React.FC<PlacePopupProps> = ({ place, onClose, userCoor
           }
         }
 
-        // Merge with images passed from card (avoid duplicates)
+        // Use images passed from card (Foursquare/OSM photos)
         if (place.images && place.images.length > 0) {
            const existing = new Set(photos);
            place.images.forEach(img => {
              if (!existing.has(img)) photos.push(img);
            });
         }
-        
+
         // Limit to max 8 images total
         photos = photos.slice(0, 8);
 

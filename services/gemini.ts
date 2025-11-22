@@ -2,7 +2,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { Coordinates, Place, PlaceCategory, Review } from "../types";
 import Constants from 'expo-constants';
-import { searchPlaceByName, getPlaceOpenStatus, getPlaceFullDetails, getPlaceDetailsByIdDirect, getPlacePhotoUrl, getNearbyPlaces } from './places';
+// Google Places API removed - too expensive ($300/day in testing)
 import { reverseGeocode } from './geocoding';
 import {
   searchFoursquarePlaces,
@@ -12,6 +12,13 @@ import {
   buildMapsLink,
   FoursquarePlace
 } from './foursquare';
+import {
+  searchOSMActivities,
+  formatOSMAddress,
+  buildMapsLinkFromOSM,
+  getOSMCategoryDescription,
+  OSMPlace
+} from './openstreetmap';
 
 // TEMPORARY: Bypass Gemini and use Google Places API only (for quota testing)
 const BYPASS_GEMINI = true;
@@ -1053,7 +1060,10 @@ export const getRecommendationsWithFoursquare = async (
               text: tip.text,
               type: 'user' as const
             })) || [],
-            images: [], // Empty - lazy loaded by PlaceCard (drawer 8)
+            // Extract FREE photos from Foursquare search results (no extra API calls!)
+            images: fsqPlace.photos?.slice(0, 5).map(photo =>
+              `${photo.prefix}400x400${photo.suffix}`
+            ) || [],
             isOpen: fsqPlace.hours?.open_now,
           };
         })
@@ -1085,10 +1095,67 @@ export const getRecommendationsWithFoursquare = async (
           continue;
         }
 
-        // Return what we have, even if less than target
+        // If still not enough places and searching for DO category, try OSM as fallback
+        if (finalPlaces.length < MIN_PLACES && categoryFilters.includes(PlaceCategory.DO)) {
+          console.log(`⚠️ Only ${finalPlaces.length} Foursquare results for DO category`);
+          console.log(`🗺️ Trying OpenStreetMap Overpass API as fallback...`);
+
+          try {
+            // Convert radius from km to meters for OSM API
+            const radiusInMeters = currentRadius * 1000;
+            const osmPlaces = await searchOSMActivities(
+              coords.latitude,
+              coords.longitude,
+              radiusInMeters
+            );
+
+            // Convert OSM places to our Place format
+            const osmFormattedPlaces: Place[] = osmPlaces.map((osm) => ({
+              id: `osm-${osm.id}`,
+              name: osm.tags.name || 'Unknown',
+              address: formatOSMAddress(osm),
+              category: PlaceCategory.DO,
+              rating: 'Not rated', // OSM doesn't have ratings
+              description: getOSMCategoryDescription(osm),
+              reason: `${getOSMCategoryDescription(osm)} - Community-recommended activity venue`,
+              mapLink: buildMapsLinkFromOSM(osm),
+              images: [], // Will be loaded from Google Photos later
+              tags: [], // OSM venues don't have our custom tags
+              reviews: [], // OSM doesn't have reviews - photos/ratings will be fetched from Google
+            }));
+
+            // Merge with Foursquare results, deduplicate by name similarity
+            const mergedPlaces = [...finalPlaces];
+            for (const osmPlace of osmFormattedPlaces) {
+              const isDuplicate = mergedPlaces.some(
+                (p) => p.name.toLowerCase() === osmPlace.name.toLowerCase()
+              );
+              if (!isDuplicate) {
+                mergedPlaces.push(osmPlace);
+              }
+            }
+
+            console.log(`✅ OSM added ${mergedPlaces.length - finalPlaces.length} new venues`);
+            console.log(`📍 Total: ${mergedPlaces.length} places (${finalPlaces.length} from Foursquare + ${mergedPlaces.length - finalPlaces.length} from OSM)`);
+
+            if (mergedPlaces.length >= MIN_PLACES) {
+              return { city, places: mergedPlaces.slice(0, 18) };
+            }
+
+            // Even with OSM fallback, still not enough - return what we have
+            console.log(`⚠️ Still only ${mergedPlaces.length} places after OSM fallback`);
+            return { city, places: mergedPlaces };
+          } catch (osmError) {
+            console.error('❌ OSM fallback failed:', osmError);
+            console.log(`✅ Returning ${finalPlaces.length} Foursquare-only places`);
+            return { city, places: finalPlaces };
+          }
+        }
+
+        // Return what we have, even if less than target (non-DO categories)
         if (finalPlaces.length < MIN_PLACES) {
           console.log(`⚠️ Only ${finalPlaces.length} Foursquare results for ${categoryFilters.join(', ')} after ${attempts} attempts`);
-          console.log(`✅ Returning ${finalPlaces.length} places (activities are rare in this area)`);
+          console.log(`✅ Returning ${finalPlaces.length} places (rare category in this area)`);
           return { city, places: finalPlaces };
         }
       }

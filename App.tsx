@@ -1362,10 +1362,13 @@ export function DiscoverScreen() {
                       <Text style={styles.aboutTitle}>VibeCheck</Text>
                       <Text style={styles.aboutVersion}>Version 1.0.0</Text>
                       <Text style={styles.aboutDescription}>
-                        AI-powered place discovery with real-time data from Google Places API.
+                        AI-powered place discovery with real-time data from Foursquare and OpenStreetMap.
                       </Text>
                       <Text style={styles.aboutTech}>
                         Powered by Gemini 2.5 Flash-Lite
+                      </Text>
+                      <Text style={[styles.aboutTech, { fontSize: 10, marginTop: 8, opacity: 0.7 }]}>
+                        Data sources: Foursquare Places API, © OpenStreetMap contributors
                       </Text>
                     </View>
                   </View>

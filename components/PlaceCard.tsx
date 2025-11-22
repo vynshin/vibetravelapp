@@ -65,52 +65,14 @@ export const PlaceCard: React.FC<PlaceCardProps> = ({ place, delay, onSelect, on
     ]).start();
   }, [delay]);
 
-  // Lazy load Google Photos + check business status when card renders (drawer 8)
+  // DISABLED: Google Places API calls are too expensive ($300/day in testing)
+  // Photos and business status checks are now handled by Foursquare/OSM only
   useEffect(() => {
     if (place.images && place.images.length > 0) {
       setPlaceImages(place.images);
-      return;
     }
-
-    if (!coords) return;
-
-    let isMounted = true;
-
-    // Import getPlaceFullDetails to check business status
-    import('../services/places').then(({ getPlaceFullDetails }) => {
-      getPlaceFullDetails(place.name, coords.latitude, coords.longitude)
-        .then(details => {
-          if (!isMounted) return;
-
-          // Check business status (FREE - included in the same API call as photos)
-          if (details?.business_status === 'CLOSED_PERMANENTLY' ||
-              details?.business_status === 'CLOSED_TEMPORARILY') {
-            console.log(`🚫 Place is closed: ${place.name} (${details.business_status})`);
-            setIsClosed(true);
-            // Notify parent to hide this card
-            if (onHidePlace) {
-              onHidePlace(place.name);
-            }
-            return;
-          }
-
-          // Load photos if business is open
-          if (details?.photos && details.photos.length > 0) {
-            import('../services/places').then(({ getPlacePhotoUrl }) => {
-              const photoUrls = details.photos
-                .slice(0, 8)
-                .map((photo: any) => getPlacePhotoUrl(photo.photo_reference, 400));
-              setPlaceImages(photoUrls);
-            });
-          }
-        })
-        .catch((err) => {
-          console.error(`Failed to load details for ${place.name}:`, err);
-        });
-    });
-
-    return () => { isMounted = false; };
-  }, [place.name, place.images, coords?.latitude, coords?.longitude]);
+    // No longer making Google Places API calls per card
+  }, [place.images]);
 
   const handleSelect = () => {
     onSelect({ ...place, images: placeImages });
