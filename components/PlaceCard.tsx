@@ -275,12 +275,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   starIcon: {
-    fontSize: 10,
+    fontSize: 12,
     color: '#fbbf24',
   },
   ratingText: {
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     color: '#fbbf24',
   },
   numberBadge: {
