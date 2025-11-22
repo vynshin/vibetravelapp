@@ -93,8 +93,12 @@ const CATEGORY_MAPPING: Record<PlaceCategory, string[]> = {
 export interface FoursquarePlace {
   fsq_place_id: string; // New API uses fsq_place_id
   name: string;
-  latitude?: number;  // New API has lat/lng at root
-  longitude?: number;
+  geocodes?: {
+    main?: {
+      latitude: number;
+      longitude: number;
+    };
+  };
   location: {
     address?: string;
     formatted_address?: string;
@@ -171,7 +175,7 @@ export async function searchFoursquarePlaces(
       radius: validRadius.toString(),
       limit: limit.toString(),
       sort: 'RELEVANCE',
-      fields: 'name,location,categories,distance,rating,stats,hours,tel,website,price,photos,popularity',
+      fields: 'name,location,geocodes,categories,distance,rating,stats,hours,tel,website,price,photos,popularity',
     });
 
     // Add category filter
@@ -388,9 +392,9 @@ export function formatFoursquareRating(rating?: number, totalRatings?: number): 
  * Build Google Maps link from Foursquare location
  */
 export function buildMapsLink(place: FoursquarePlace): string {
-  // New API has lat/lng at root level
-  const lat = place.latitude;
-  const lng = place.longitude;
+  // New API has geocodes.main with lat/lng
+  const lat = place.geocodes?.main?.latitude;
+  const lng = place.geocodes?.main?.longitude;
 
   if (lat && lng) {
     return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}&query_place_id=${encodeURIComponent(place.name)}`;
